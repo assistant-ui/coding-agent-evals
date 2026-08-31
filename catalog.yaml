@@ -1,0 +1,86 @@
+{
+  "harbor_version": "0.20",
+  "default_env": "blaxel",
+  "n_concurrent_trials": 10,
+  "blaxel": {
+    "region": "us-pdx-1",
+    "deployment_timeout_sec": 7200
+  },
+  "agents": [
+    {
+      "id": "cursor-cli",
+      "name": "Cursor CLI",
+      "model": "cursor/composer-2.5",
+      "tier": "Composer 2.5"
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "model": "anthropic/claude-sonnet-5",
+      "tier": "Sonnet 5"
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "model": "openai/gpt-5.6-luna",
+      "tier": "GPT-5.6 Luna"
+    }
+  ],
+  "cases": [
+    {
+      "id": "g1",
+      "folder": "pb-1",
+      "name": "Persistence"
+    },
+    {
+      "id": "g2",
+      "folder": "pb-2",
+      "name": "HTML canvas"
+    },
+    {
+      "id": "g3",
+      "folder": "g3-editable-page",
+      "name": "Editable page"
+    },
+    {
+      "id": "g4",
+      "folder": "g4-mcp-apps",
+      "name": "User-managed MCP"
+    },
+    {
+      "id": "g5",
+      "folder": "g5-eve",
+      "name": "Eve"
+    },
+    {
+      "id": "g6",
+      "folder": "g6-mastra",
+      "name": "Mastra"
+    },
+    {
+      "id": "g7",
+      "folder": "g7-langgraph",
+      "name": "LangGraph HITL"
+    },
+    {
+      "id": "g8",
+      "folder": "g8-vite",
+      "name": "Vite"
+    },
+    {
+      "id": "g9",
+      "folder": "g9-react-native",
+      "name": "React Native / Expo"
+    },
+    {
+      "id": "g10",
+      "folder": "g10-chatgpt-shell",
+      "name": "ChatGPT-like shell"
+    },
+    {
+      "id": "g11",
+      "folder": "g11-claude-shell",
+      "name": "Claude-like shell"
+    }
+  ]
+}

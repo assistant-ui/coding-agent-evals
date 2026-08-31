@@ -1,0 +1,8 @@
+.env
+jobs/*
+!jobs/.gitkeep
+tasks/*/environment/mcp-docs-server.tgz
+**/.pytest_cache/
+**/__pycache__/
+*.pyc
+.run/

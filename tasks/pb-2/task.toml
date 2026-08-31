@@ -1,0 +1,53 @@
+schema_version = "1.4"
+
+artifacts = [
+  { source = "/workspace", exclude = ["node_modules", ".git", ".next", "dist", "coverage"] },
+]
+
+[task]
+name = "assistant-ui/pb-2"
+version = "0.1.0"
+authors = []
+keywords = ["assistant-ui", "harbor", "pb-2", "html-canvas", "artifacts"]
+description = "M3 PB-2: chat plus side HTML canvas (artifacts)."
+
+[metadata]
+category = "app-building"
+workstream = "assistant-ui-agent-evals"
+
+[agent]
+timeout_sec = 3600.0
+
+[verifier]
+timeout_sec = 1800.0
+
+[verifier.env]
+OPENAI_API_KEY = "${OPENAI_API_KEY}"
+JUDGE_MODEL = "gpt-5.6-luna"
+# Default MCP on. MCP-off jobs override this and environment.env together.
+PB1_MCP = "on"
+
+[environment]
+network_mode = "public"
+# First Playwright + MCP image on Blaxel is slow. Harbor also uses this as
+# the environment-start wait (image.build + sandbox create).
+build_timeout_sec = 7200.0
+memory_mb = 8192
+storage_mb = 10240
+workdir = "/workspace"
+cpus = 2
+
+# Harbor always registers this server from the task table. Job YAML cannot
+# remove it. PB1_MCP=off (environment.env) makes the stdio command exit so
+# the agent has no assistant-ui tools. Default on is assistant-ui-mcp.
+[environment.env]
+PB1_MCP = "on"
+
+[[environment.mcp_servers]]
+name = "assistant-ui"
+transport = "stdio"
+command = "bash"
+args = [
+  "-lc",
+  "case ${PB1_MCP:-on} in off|0|false|no|disabled) exec true;; *) exec assistant-ui-mcp;; esac",
+]

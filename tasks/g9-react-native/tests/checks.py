@@ -1,0 +1,147 @@
+"""Check catalog. Report.py maps pytest / gates onto these IDs."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+MCP_ENV_KEY = "PB1_MCP"
+_MCP_OFF = frozenset({"off", "0", "false", "no", "disabled"})
+
+PYTEST_ID_RE = re.compile(
+    r"^test_(?P<body>.+?)(?:\[.*\])?$",
+)
+
+
+@dataclass(frozen=True)
+class Check:
+    id: str
+    title: str
+    group: str
+    implemented: bool = True
+    skip_on_gold: bool = False
+    skip_on_mcp_off: bool = False
+
+
+CHECKS: tuple[Check, ...] = (
+    Check("CQ-G-01", "App package.json exists under /workspace", "code"),
+    Check("CQ-G-02", "Depends on @assistant-ui/react-native", "code"),
+    Check("CQ-G-03", "Depends on expo", "code"),
+    Check("CQ-G-04", "Expo / React Native app, not Next.js", "code"),
+    Check("CQ-G-05", "AssistantRuntimeProvider in source", "code"),
+    Check("CQ-G-06", "Thread in source", "code"),
+    Check("CQ-P-01", "defineToolkit in source", "code"),
+    Check("CQ-P-02", '"use generative" toolkit', "code"),
+    Check("CQ-P-03", "Tool render (generative UI)", "code"),
+    Check("CQ-P-04", "weather_search or geocode_location tool", "code"),
+    Check("CQ-P-05", "OPENAI_API_KEY documented; no live secrets", "code"),
+    Check("AR-01", "Dependencies install", "apprun"),
+    Check("AR-02", "Expo web export / build", "apprun"),
+    Check("AR-03", "Verifier starts Expo web and GET / succeeds", "apprun"),
+    Check("AR-04", "GET / is Expo web, not Next.js", "apprun"),
+    Check("BR-01", "Composer is visible", "browser"),
+    Check("BR-02", "No critical pageerror on load", "browser"),
+    Check("BR-03", "Type weather prompt and send", "browser"),
+    Check("BR-04", "User message appears in the thread", "browser"),
+    Check("BR-05", "Weather card / generative tool UI after send", "browser"),
+    Check(
+        "WF-D-01",
+        "Used assistant-ui MCP or web docs (per PB1_MCP)",
+        "workflow",
+        True,
+        True,
+    ),
+    Check(
+        "WF-D-02",
+        "Docs before first scaffold or write",
+        "workflow",
+        True,
+        True,
+    ),
+    Check("WF-S-01", "Scaffolded with assistant-ui CLI create", "workflow", True, True),
+    Check("WF-S-02", "create used a listed --example or --template id", "workflow", True, True),
+    Check("WF-E-01", "Did not face assistant-ui create CLI errors", "workflow", True, True),
+    Check("WF-E-02", "Did not face TypeScript/build errors in the agent run", "workflow", True, True),
+    Check("WF-T-01", "Agent started the app", "workflow", True, True),
+    Check("WF-T-02", "Agent tested the running app", "workflow", True, True),
+)
+
+BY_ID = {check.id: check for check in CHECKS}
+
+
+def mcp_enabled() -> bool:
+    raw = os.environ.get(MCP_ENV_KEY, "on").strip().lower()
+    if not raw:
+        return True
+    return raw not in _MCP_OFF
+
+
+_CQ_G_01_KEEP = frozenset({"CQ-G-01", "WF-E-01", "WF-E-02"})
+
+SKIP_AFTER_FAIL: dict[str, tuple[str, ...]] = {
+    "CQ-G-01": tuple(
+        check.id
+        for check in CHECKS
+        if check.id not in _CQ_G_01_KEEP and check.implemented
+    ),
+    "AR-01": ("AR-02", "AR-03", "AR-04", "BR-01", "BR-02", "BR-03", "BR-04", "BR-05"),
+    "AR-02": ("AR-03", "AR-04", "BR-01", "BR-02", "BR-03", "BR-04", "BR-05"),
+    "AR-03": ("AR-04", "BR-01", "BR-02", "BR-03", "BR-04", "BR-05"),
+    "BR-01": ("BR-03", "BR-04", "BR-05"),
+    "BR-03": ("BR-04", "BR-05"),
+    "BR-04": ("BR-05",),
+    "WF-S-01": ("WF-S-02",),
+}
+
+
+def id_from_pytest_name(name: str) -> str | None:
+    match = PYTEST_ID_RE.match(name)
+    if match is None:
+        return None
+    parts = match.group("body").split("_")
+    if len(parts) >= 3 and parts[0] in {"wf", "cq"}:
+        candidate = f"{parts[0].upper()}-{parts[1].upper()}-{parts[2]}"
+        return candidate if candidate in BY_ID else None
+    if len(parts) >= 2 and parts[0] in {"ar", "br"}:
+        candidate = f"{parts[0].upper()}-{parts[1]}"
+        return candidate if candidate in BY_ID else None
+    return None
+
+
+def set_gate(path: Path, check_id: str, passed: bool, notes: str = "") -> None:
+    data: dict[str, dict[str, object]] = {}
+    if path.is_file():
+        data = json.loads(path.read_text())
+    row: dict[str, object] = {"passed": passed, "status": "passed" if passed else "failed"}
+    if notes:
+        row["notes"] = notes
+    data[check_id] = row
+    if not passed:
+        for dependent in SKIP_AFTER_FAIL.get(check_id, ()):
+            if dependent not in data:
+                data[dependent] = {
+                    "passed": True,
+                    "status": "skipped",
+                    "notes": f"skipped because {check_id} failed",
+                }
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def main() -> None:
+    import sys
+
+    if len(sys.argv) >= 4 and sys.argv[1] == "--set-gate":
+        path = Path(sys.argv[2])
+        check_id = sys.argv[3]
+        passed = sys.argv[4] == "pass"
+        notes = sys.argv[5] if len(sys.argv) > 5 else ""
+        set_gate(path, check_id, passed, notes)
+        return
+    raise SystemExit("usage: checks.py --set-gate FILE ID pass|fail [notes]")
+
+
+if __name__ == "__main__":
+    main()

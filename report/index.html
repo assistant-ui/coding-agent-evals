@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evaluating agents across assistant-ui</title>
+  <style>
+    :root {
+      --bg: oklch(0.145 0 0);
+      --fg: oklch(0.985 0 0);
+      --card: oklch(0.205 0 0);
+      --muted: oklch(0.269 0 0);
+      --muted-fg: oklch(0.708 0 0);
+      --border: oklch(1 0 0 / 10%);
+      --ring: oklch(0.556 0 0);
+      --fail: oklch(0.75 0.16 22);
+      --pass: oklch(0.78 0.12 155);
+      --mid: oklch(0.82 0.14 85);
+      --radius: 0.625rem;
+      --font: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font); }
+    button { font: inherit; color: inherit; }
+    .page { max-width: 1280px; margin: 0 auto; padding: 48px 24px 96px; }
+    .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: end; padding-bottom: 40px; }
+    .hero h1 { margin: 0; font-size: 44px; font-weight: 500; letter-spacing: -0.04em; line-height: 1.05; }
+    .hero h1 span { display: block; color: var(--muted-fg); }
+    .hero p { margin: 0; color: var(--muted-fg); max-width: 48ch; }
+    .table-card {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--card); overflow: hidden;
+    }
+    .toolbar {
+      display: flex; justify-content: space-between; gap: 12px; align-items: center;
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+      background: color-mix(in oklch, var(--muted) 70%, transparent); flex-wrap: wrap;
+    }
+    .seg { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+    .seg button {
+      border: 0; background: transparent; padding: 6px 12px; border-radius: 6px;
+      color: var(--muted-fg); cursor: pointer; font-size: 13px;
+    }
+    .seg button[aria-pressed="true"] { background: var(--muted); color: var(--fg); }
+    .hint { color: var(--muted-fg); font-size: 13px; }
+    .scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); vertical-align: top; }
+    th:last-child, td:last-child { border-right: 0; }
+    thead th {
+      text-align: left; font-weight: 500; color: var(--muted-fg);
+      padding: 8px 12px; background: color-mix(in oklch, var(--muted) 45%, transparent);
+    }
+    thead .group { text-align: center; border-bottom: 0; }
+    thead .sub { font-weight: 400; font-size: 12px; }
+    tbody th { text-align: left; font-weight: 500; padding: 0; width: 240px; }
+    tbody td { padding: 0; }
+    .harness { display: block; }
+    .model { display: block; color: var(--muted-fg); font-weight: 400; font-size: 12px; margin-top: 2px; font-family: var(--mono); }
+    .toggle {
+      display: flex; align-items: flex-start; gap: 8px; width: 100%;
+      border: 0; background: transparent; padding: 12px; cursor: pointer; text-align: left;
+    }
+    .chevron {
+      width: 8px; height: 8px; margin-top: 5px; border-right: 1.5px solid var(--muted-fg);
+      border-bottom: 1.5px solid var(--muted-fg); transform: rotate(-45deg); flex: none;
+    }
+    tr.open .chevron { transform: rotate(45deg); margin-top: 3px; }
+    .child th, .child td { background: color-mix(in oklch, var(--muted) 35%, transparent); }
+    .child-label { display: block; padding: 12px 12px 12px 36px; font-weight: 400; }
+    .avg-row th, .avg-row td {
+      background: color-mix(in oklch, var(--muted) 55%, transparent);
+    }
+    .avg-row .label {
+      display: block; padding: 12px; color: var(--fg); font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    .avg-tag {
+      margin-left: 6px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--muted-fg); vertical-align: 1px;
+    }
+    .badge {
+      margin-left: 8px; font-size: 11px; font-family: var(--mono); color: var(--pass);
+    }
+    .cell-btn {
+      display: block; width: 100%; text-align: left; background: transparent;
+      border: 0; padding: 10px 12px; cursor: pointer;
+    }
+    .cell-btn:hover, .toggle:hover { background: color-mix(in oklch, var(--muted) 50%, transparent); }
+    .cell-btn:focus-visible, .toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+    .score { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+    .meta { display: block; color: var(--muted-fg); font-family: var(--mono); font-size: 11px; margin-top: 3px; }
+    .empty { color: oklch(1 0 0 / 28%); font-family: var(--mono); padding: 10px 12px; }
+    .hi { color: var(--pass); }
+    .mid { color: var(--mid); }
+    .lo { color: var(--fail); }
+    .overlay {
+      position: fixed; inset: 0; background: oklch(0 0 0 / 45%);
+      display: none; justify-content: flex-end; z-index: 40;
+    }
+    .overlay.open { display: flex; }
+    .sheet {
+      width: min(720px, 100%); height: 100%; background: var(--bg);
+      border-left: 1px solid var(--border); overflow: auto; padding: 28px 28px 64px;
+    }
+    .sheet-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 24px; }
+    .sheet-kicker { margin: 0; color: var(--muted-fg); font-size: 14px; }
+    .sheet h2 { margin: 4px 0 0; font-size: 22px; font-weight: 500; letter-spacing: -0.03em; }
+    .sheet-stats { text-align: right; color: var(--muted-fg); font-size: 13px; }
+    .close {
+      position: absolute; top: 16px; right: 16px; width: 32px; height: 32px;
+      border: 1px solid var(--border); background: var(--card); border-radius: 8px; cursor: pointer;
+    }
+    .dl { display: grid; grid-template-columns: 7.5rem 1fr; gap: 14px 16px; font-size: 13px; margin-top: 8px; }
+    .dl dt { color: var(--muted-fg); padding-top: 2px; }
+    .block {
+      margin: 0; max-height: 220px; overflow: auto; padding: 12px 14px;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+      white-space: pre-wrap; font-size: 13px; line-height: 1.55; color: var(--muted-fg);
+    }
+    .checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+    .checks li { display: grid; grid-template-columns: 8px 1fr; gap: 10px; align-items: start; }
+    .dot { width: 8px; height: 8px; border-radius: 99px; margin-top: 6px; background: var(--fail); }
+    .fail-title { display: block; font-weight: 500; }
+    .notes { display: block; color: var(--muted-fg); margin-top: 3px; }
+    .ok { color: var(--muted-fg); margin: 12px 0 0; }
+    .copy-btn {
+      margin-top: 12px; border: 1px solid var(--border); background: var(--card);
+      border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px;
+    }
+    .copy-btn:hover { background: var(--muted); }
+    .copy-btn.done { color: var(--pass); }
+    @media (max-width: 800px) {
+      .hero { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 32px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <h1>Evaluating agents<span>across assistant-ui</span></h1>
+      <p id="hero-copy">How well coding agents build real assistant-ui apps, with product docs tools on and off.</p>
+    </header>
+    <section class="table-card" aria-label="Results">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Group by">
+          <button type="button" id="view-harness" aria-pressed="true">Group by harness</button>
+          <button type="button" id="view-case" aria-pressed="false">Group by case</button>
+        </div>
+        <span class="hint">Time is agent runtime. Cost is model API spend. Em dash means not run.</span>
+      </div>
+      <div class="scroll" id="table-root"></div>
+    </section>
+  </div>
+  <div class="overlay" id="overlay" hidden>
+    <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <button class="close" type="button" id="close" aria-label="Close">×</button>
+      <div id="sheet-body"></div>
+    </aside>
+  </div>
+  <script src="data.js"></script>
+  <script>
+    const REPORT = window.REPORT;
+    if (!REPORT) {
+      document.getElementById("table-root").innerHTML =
+        "<p class='hint' style='padding:16px'>Missing data.js. Run scripts/ingest.py.</p>";
+      throw new Error("REPORT missing");
+    }
+    const CASES = REPORT.cases;
+    const HARNESSES = REPORT.harnesses;
+    const RUNS = REPORT.runs || [];
+    const FAIL = REPORT.fail_titles || {};
+    document.getElementById("hero-copy").textContent =
+      "How well coding agents build real assistant-ui apps, with product docs tools on and off. Grid from " +
+      (REPORT.generated_at || "ingest") + ".";
+
+    const $ = (id) => document.getElementById(id);
+    let view = "harness";
+    const openHarness = new Set();
+
+    function fmtPct(n) { return (n * 100).toFixed(1) + "%"; }
+    function fmtTime(sec) {
+      if (sec == null) return "—";
+      const m = Math.floor(sec / 60);
+      const s = Math.round(sec % 60);
+      return m ? `${m}m ${s}s` : `${s}s`;
+    }
+    function fmtCost(n) { return n == null ? "—" : "$" + Number(n).toFixed(2); }
+    function scoreClass(n) {
+      if (n >= 0.9) return "hi";
+      if (n >= 0.8) return "mid";
+      return "lo";
+    }
+    function runOf(caseId, harness, mcp) {
+      return RUNS.find((r) => r.caseId === caseId && r.harness === harness && r.mcp === mcp);
+    }
+    function mean(nums) {
+      const xs = nums.filter((n) => n != null);
+      return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+    }
+    function surfaceAvg(harness, mcp) {
+      const runs = CASES.map((c) => runOf(c.id, harness, mcp)).filter(Boolean);
+      if (!runs.length) return null;
+      return {
+        reward: mean(runs.map((r) => r.reward)),
+        agentSec: mean(runs.map((r) => r.agentSec)),
+        cost: mean(runs.map((r) => r.cost)),
+        n: runs.length,
+      };
+    }
+    function caseLabel(c) {
+      const v = c.verifier && c.verifier.reward != null
+        ? `<span class="badge">verifier ${fmtPct(c.verifier.reward)}</span>`
+        : "";
+      return `${c.name}${v}`;
+    }
+    function cellHtml(run, key, { summary } = {}) {
+      if (!run || run.reward == null) return `<div class="empty">—</div>`;
+      const meta = summary
+        ? `${fmtTime(run.agentSec)} · ${fmtCost(run.cost)}`
+        : `${run.passed}/${run.applicable} · ${fmtTime(run.agentSec)} · ${fmtCost(run.cost)}`;
+      const tag = summary ? `<span class="avg-tag">avg</span>` : "";
+      return `<button type="button" class="cell-btn" data-open="${key}">
+        <span class="score ${scoreClass(run.reward)}">${fmtPct(run.reward)}</span>${tag}
+        <span class="meta">${meta}</span>
+      </button>`;
+    }
+    function renderHarnessView() {
+      const head = `<tr><th>Harness</th><th>MCP on</th><th>MCP off</th></tr>`;
+      const body = HARNESSES.map((h) => {
+        const on = surfaceAvg(h.id, "on");
+        const off = surfaceAvg(h.id, "off");
+        const expanded = openHarness.has(h.id);
+        const parent = `<tr class="avg-row${expanded ? " open" : ""}">
+          <th>
+            <button type="button" class="toggle" data-expand="${h.id}" aria-expanded="${expanded}">
+              <span class="chevron"></span>
+              <span>
+                <span class="harness">${h.name}</span>
+                <span class="model">${h.model} · ${h.tier}</span>
+              </span>
+            </button>
+          </th>
+          <td>${cellHtml(on, `avg|${h.id}|on`, { summary: true })}</td>
+          <td>${cellHtml(off, `avg|${h.id}|off`, { summary: true })}</td>
+        </tr>`;
+        if (!expanded) return parent;
+        const kids = CASES.map((c) => `<tr class="child">
+          <th><span class="child-label">${caseLabel(c)}</span></th>
+          <td>${cellHtml(runOf(c.id, h.id, "on"), `run|${c.id}|${h.id}|on`)}</td>
+          <td>${cellHtml(runOf(c.id, h.id, "off"), `run|${c.id}|${h.id}|off`)}</td>
+        </tr>`).join("");
+        return parent + kids;
+      }).join("");
+      return `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+    function renderCaseView() {
+      const group = HARNESSES.map((h) =>
+        `<th class="group" colspan="2">${h.name}<div class="model">${h.model}</div></th>`
+      ).join("");
+      const subs = HARNESSES.map(() => `<th class="sub">MCP on</th><th class="sub">MCP off</th>`).join("");
+      const avgCells = HARNESSES.flatMap((h) => ["on", "off"].map((mcp) =>
+        `<td>${cellHtml(surfaceAvg(h.id, mcp), `avg|${h.id}|${mcp}`, { summary: true })}</td>`
+      )).join("");
+      const caseRows = CASES.map((c) => {
+        const cells = HARNESSES.flatMap((h) => ["on", "off"].map((mcp) =>
+          `<td>${cellHtml(runOf(c.id, h.id, mcp), `run|${c.id}|${h.id}|${mcp}`)}</td>`
+        )).join("");
+        return `<tr>
+          <th><span class="child-label" style="padding-left:12px">${caseLabel(c)}</span></th>
+          ${cells}
+        </tr>`;
+      }).join("");
+      return `<table>
+        <thead>
+          <tr><th rowspan="2">Case</th>${group}</tr>
+          <tr>${subs}</tr>
+        </thead>
+        <tbody>
+          <tr class="avg-row">
+            <th><span class="label">Average across cases</span></th>
+            ${avgCells}
+          </tr>
+          ${caseRows}
+        </tbody>
+      </table>`;
+    }
+    function openSheet(html) {
+      $("sheet-body").innerHTML = html;
+      const ov = $("overlay");
+      ov.hidden = false;
+      ov.classList.add("open");
+    }
+    function closeSheet() {
+      const ov = $("overlay");
+      ov.classList.remove("open");
+      ov.hidden = true;
+    }
+    function failList(run) {
+      const details = run.failedDetail || (run.failed || []).map((id) => ({ id, title: "", notes: "" }));
+      return details.map((item) => {
+        const f = FAIL[item.id] || {};
+        const title = item.title || f.title || item.id;
+        const notes = item.notes || f.notes || "";
+        return `<li>
+          <span class="dot"></span>
+          <span>
+            <span class="fail-title">${title}</span>
+            ${notes ? `<span class="notes">${notes}</span>` : ""}
+          </span>
+        </li>`;
+      }).join("");
+    }
+    function runSheet(run, caseMeta, harness, mcp) {
+      const h = HARNESSES.find((x) => x.id === harness);
+      const mcpLabel = mcp === "on" ? "with product docs tools" : "without product docs tools";
+      return `
+        <div class="sheet-top">
+          <div>
+            <p class="sheet-kicker">${h.name} · ${h.model} · ${mcpLabel}</p>
+            <h2 id="sheet-title">${caseMeta.name}</h2>
+          </div>
+          <div class="sheet-stats">
+            <div class="score ${scoreClass(run.reward)}">${fmtPct(run.reward)}</div>
+            <div>${run.passed} of ${run.applicable} checks passed</div>
+            <div>${fmtTime(run.agentSec)} · ${fmtCost(run.cost)}</div>
+            <button type="button" class="copy-btn" data-copy="${caseMeta.id}|${harness}|${mcp}">Copy for investigation</button>
+          </div>
+        </div>
+        <dl class="dl">
+          <dt>Asked to build</dt>
+          <dd><pre class="block">${caseMeta.prompt || ""}</pre></dd>
+          <dt>Agent finished with</dt>
+          <dd><pre class="block">${run.lastMessage || "No final message captured."}</pre></dd>
+          <dt>What failed</dt>
+          <dd>
+            <ul class="checks">${failList(run) || "<li><span class='ok'>Nothing listed.</span></li>"}</ul>
+            <p class="ok">${run.passed} other checks passed.</p>
+          </dd>
+        </dl>`;
+    }
+    function investigationBrief(run, caseMeta, harness, mcp) {
+      const h = HARNESSES.find((x) => x.id === harness);
+      const surface = mcp === "on"
+        ? "Product docs tools ON (assistant-ui MCP)"
+        : "Product docs tools OFF (web docs only)";
+      const fails = (run.failedDetail || []).map((item) => {
+        const f = FAIL[item.id] || {};
+        return `- ${item.title || f.title || item.id}\n  ${item.notes || ""}`.trim();
+      }).join("\n");
+      return `Investigate why this coding agent scored poorly on an assistant-ui app-building eval.
+
+Case: ${caseMeta.name}
+User prompt:
+${caseMeta.prompt}
+
+Agent: ${h.name} (${h.model})
+Surface: ${surface}
+Score: ${fmtPct(run.reward)} (${run.passed} of ${run.applicable} checks passed)
+Agent runtime: ${fmtTime(run.agentSec)}
+API cost: ${fmtCost(run.cost)}
+
+Final agent message:
+${run.lastMessage || "(none)"}
+
+What failed:
+${fails || "- (none listed)"}
+
+${run.passed} other checks passed.`;
+    }
+    function avgSheet(harness, mcp) {
+      const h = HARNESSES.find((x) => x.id === harness);
+      const mcpLabel = mcp === "on" ? "with product docs tools" : "without product docs tools";
+      const rows = CASES.map((c) => {
+        const run = runOf(c.id, harness, mcp);
+        if (!run) {
+          return `<div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);color:var(--muted-fg)">
+            <span>${c.name}</span><span>—</span>
+          </div>`;
+        }
+        return `<button type="button" class="cell-btn" style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)" data-open="run|${c.id}|${harness}|${mcp}">
+          <span>${c.name}<span class="model">${(run.failed || []).length} failed</span></span>
+          <span class="score ${scoreClass(run.reward)}">${fmtPct(run.reward)}</span>
+        </button>`;
+      }).join("");
+      const avg = surfaceAvg(harness, mcp);
+      return `
+        <div class="sheet-top">
+          <div>
+            <p class="sheet-kicker">${mcpLabel}</p>
+            <h2 id="sheet-title">${h.name}</h2>
+            <p class="model">${h.model} · average across cases with results</p>
+          </div>
+          <div class="sheet-stats">
+            ${avg ? `<div class="score ${scoreClass(avg.reward)}">${fmtPct(avg.reward)}</div>` : ""}
+          </div>
+        </div>
+        ${rows}`;
+    }
+    function render() {
+      $("table-root").innerHTML = view === "harness" ? renderHarnessView() : renderCaseView();
+    }
+    $("view-harness").onclick = () => {
+      view = "harness";
+      $("view-harness").setAttribute("aria-pressed", "true");
+      $("view-case").setAttribute("aria-pressed", "false");
+      render();
+    };
+    $("view-case").onclick = () => {
+      view = "case";
+      $("view-harness").setAttribute("aria-pressed", "false");
+      $("view-case").setAttribute("aria-pressed", "true");
+      render();
+    };
+    $("close").onclick = closeSheet;
+    $("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeSheet(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+    $("table-root").addEventListener("click", (e) => {
+      const exp = e.target.closest("[data-expand]");
+      if (exp) {
+        const id = exp.dataset.expand;
+        if (openHarness.has(id)) openHarness.delete(id);
+        else openHarness.add(id);
+        render();
+        return;
+      }
+      const btn = e.target.closest("[data-open]");
+      if (!btn) return;
+      const parts = btn.dataset.open.split("|");
+      if (parts[0] === "run") {
+        const [, caseId, harness, mcp] = parts;
+        const run = runOf(caseId, harness, mcp);
+        if (run) openSheet(runSheet(run, CASES.find((c) => c.id === caseId), harness, mcp));
+        return;
+      }
+      if (parts[0] === "avg") openSheet(avgSheet(parts[1], parts[2]));
+    });
+    $("sheet-body").addEventListener("click", (e) => {
+      const copyBtn = e.target.closest("[data-copy]");
+      if (copyBtn) {
+        const [caseId, harness, mcp] = copyBtn.dataset.copy.split("|");
+        const run = runOf(caseId, harness, mcp);
+        const caseMeta = CASES.find((c) => c.id === caseId);
+        navigator.clipboard.writeText(investigationBrief(run, caseMeta, harness, mcp)).then(() => {
+          copyBtn.textContent = "Copied";
+          copyBtn.classList.add("done");
+          setTimeout(() => {
+            copyBtn.textContent = "Copy for investigation";
+            copyBtn.classList.remove("done");
+          }, 1600);
+        });
+        return;
+      }
+      const btn = e.target.closest("[data-open]");
+      if (!btn) return;
+      const parts = btn.dataset.open.split("|");
+      if (parts[0] !== "run") return;
+      const [, caseId, harness, mcp] = parts;
+      const run = runOf(caseId, harness, mcp);
+      if (run) openSheet(runSheet(run, CASES.find((c) => c.id === caseId), harness, mcp));
+    });
+    render();
+  </script>
+</body>
+</html>

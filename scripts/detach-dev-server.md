@@ -1,0 +1,1 @@
+If you start the Next.js/dev server, start it so the shell command returns immediately (for example `nohup npm run dev >/tmp/next-dev.log 2>&1 & echo $!`). Do not leave a long-lived Cursor background terminal for `npm run dev`.
