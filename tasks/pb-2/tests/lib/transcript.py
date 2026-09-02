@@ -48,6 +48,7 @@ TOOL_KEY_MAP: dict[str, str] = {
     "LS": "list_dir",
     "Task": "agent_task",
     "TodoWrite": "agent_task",
+    "Skill": "skill_use",
     # Codex Harbor ATIF
     "exec": "shell",
     "command_execution": "shell",

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 from datetime import datetime, timezone
@@ -13,6 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MCP_OFF = frozenset({"off", "0", "false", "no", "disabled"})
 FOLDER_RE = re.compile(r"(?:^|/)(pb-1|pb-2|g\d[\w-]*)(?:/|$)")
+CHECK_RE = re.compile(
+    r'Check\(\s*"(?P<id>[A-Z0-9-]+)"\s*,\s*"(?P<title>(?:[^"\\]|\\.)*)"\s*,\s*"(?P<group>[^"]+)"',
+    re.DOTALL,
+)
 
 
 def load_catalog(path: Path) -> dict:
@@ -36,13 +39,58 @@ def seconds_between(start: str | None, end: str | None) -> float | None:
     return max(0.0, (b - a).total_seconds())
 
 
-def mcp_from_result(data: dict) -> str:
+def surface_from_result(data: dict) -> str:
     cfg = data.get("config") or {}
     env = (cfg.get("environment") or {}).get("env") or {}
-    raw = str(env.get("PB1_MCP") or "on").strip().lower()
-    if raw in MCP_OFF:
+    raw = str(env.get("PB1_SURFACE") or "").strip().lower()
+    if raw in {"skills", "skill"}:
+        return "skills"
+    if raw in {"none", "off"}:
+        return "none"
+    if raw in {"mcp", "on"}:
+        return "mcp"
+    agent = cfg.get("agent") or {}
+    if agent.get("skills"):
+        return "skills"
+    mcp = str(env.get("PB1_MCP") or "on").strip().lower()
+    if mcp in MCP_OFF:
+        return "none"
+    return "mcp"
+
+
+def mode_from_result(data: dict) -> str:
+    cfg = data.get("config") or {}
+    env = (cfg.get("environment") or {}).get("env") or {}
+    raw = str(env.get("PB1_MODE") or "").strip().lower()
+    if raw in {"low", "high"}:
+        return raw
+    agent = cfg.get("agent") or {}
+    model = str(agent.get("model_name") or "").strip().lower()
+    if any(token in model for token in ("grok-4.6", "claude-fable-5", "gpt-5.6-sol")):
+        return "high"
+    return "low"
+
+
+def mcp_from_result(data: dict) -> str:
+    """Legacy on/off axis. Prefer surface_from_result."""
+    surface = surface_from_result(data)
+    if surface == "none":
         return "off"
-    return "on"
+    if surface == "mcp":
+        return "on"
+    return surface
+
+
+def normalize_run_surface(run: dict) -> str:
+    raw = str(run.get("surface") or "").strip().lower()
+    if raw in {"none", "mcp", "skills"}:
+        return raw
+    mcp = str(run.get("mcp") or "").strip().lower()
+    if mcp in {"off", "none"}:
+        return "none"
+    if mcp in {"skills", "skill"}:
+        return "skills"
+    return "mcp"
 
 
 def folder_from_result(data: dict) -> str | None:
@@ -104,22 +152,55 @@ def score_checks(trial_dir: Path) -> tuple[int, int, list[dict]]:
     return passed, applicable, failed
 
 
-def load_check_titles(task_dir: Path) -> dict[str, str]:
+def family_of(check_id: str) -> str:
+    if check_id.startswith("CQ-G"):
+        return "Source · app skeleton"
+    if check_id.startswith("CQ-P"):
+        return "Source · product wiring"
+    if check_id.startswith("CQ"):
+        return "Source"
+    if check_id.startswith("AR"):
+        return "App run · install / build / HTTP"
+    if check_id.startswith("BR"):
+        return "Browser · Playwright"
+    if check_id.startswith("WF-D"):
+        return "Workflow · discovery (docs / MCP / skills)"
+    if check_id.startswith("WF-S"):
+        return "Workflow · scaffold (assistant-ui create)"
+    if check_id.startswith("WF-E"):
+        return "Workflow · errors during the agent run"
+    if check_id.startswith("WF-T"):
+        return "Workflow · agent started and tested the app"
+    if check_id.startswith("WF"):
+        return "Workflow"
+    return ""
+
+
+def load_check_meta(task_dir: Path) -> dict[str, dict[str, str]]:
+    """Parse Check(...) from checks.py. Do not exec — dataclass import fails here."""
     path = task_dir / "tests" / "checks.py"
     if not path.is_file():
         return {}
-    spec = importlib.util.spec_from_file_location(f"checks_{task_dir.name}", path)
-    if spec is None or spec.loader is None:
-        return {}
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception:
-        return {}
-    titles = {}
-    for check in getattr(mod, "CHECKS", ()):
-        titles[check.id] = check.title
-    return titles
+    out: dict[str, dict[str, str]] = {}
+    for match in CHECK_RE.finditer(path.read_text()):
+        cid = match.group("id")
+        out[cid] = {
+            "title": match.group("title"),
+            "group": match.group("group"),
+            "family": family_of(cid),
+        }
+    return out
+
+
+def describe_check(check_id: str, meta: dict[str, dict[str, str]]) -> dict[str, str]:
+    row = meta.get(check_id) or {}
+    title = row.get("title") or check_id
+    return {
+        "id": check_id,
+        "title": title,
+        "family": row.get("family") or family_of(check_id),
+        "group": row.get("group") or "",
+    }
 
 
 def prompt_for(task_dir: Path) -> str:
@@ -141,6 +222,38 @@ def iter_trials(jobs_dir: Path, include: set[str] | None):
             result = child / "result.json"
             if result.is_file():
                 yield job, child, result
+
+
+def short_model(model: str) -> str:
+    return model.split("/", 1)[-1]
+
+
+def harness_record(agent: dict) -> dict:
+    modes = {}
+    for name, spec in (agent.get("modes") or {}).items():
+        if name not in {"low", "high"}:
+            continue
+        model = str((spec or {}).get("model") or agent.get("model") or "")
+        modes[name] = {
+            "model": short_model(model),
+            "model_id": model,
+            "tier": (spec or {}).get("tier") or agent.get("tier"),
+        }
+    if "low" not in modes and agent.get("model"):
+        modes["low"] = {
+            "model": short_model(agent["model"]),
+            "model_id": agent["model"],
+            "tier": agent.get("tier"),
+        }
+    low = modes.get("low") or {}
+    return {
+        "id": agent["id"],
+        "name": agent["name"],
+        "model": low.get("model") or short_model(str(agent.get("model") or "")),
+        "model_id": low.get("model_id") or agent.get("model"),
+        "tier": low.get("tier") or agent.get("tier"),
+        "modes": modes,
+    }
 
 
 def trial_record(result_path: Path, folder_to_case: dict[str, dict]) -> dict | None:
@@ -171,6 +284,8 @@ def trial_record(result_path: Path, folder_to_case: dict[str, dict]) -> dict | N
         "folder": folder,
         "caseId": folder_to_case[folder]["id"],
         "agent": agent,
+        "surface": surface_from_result(data),
+        "mode": mode_from_result(data),
         "mcp": mcp_from_result(data),
         "reward": reward,
         "finished_at": finished,
@@ -201,11 +316,11 @@ def build_report(
     include_jobs: set[str] | None,
 ) -> dict:
     folder_to_case = {c["folder"]: c for c in catalog["cases"]}
-    titles: dict[str, str] = {}
+    meta: dict[str, dict[str, str]] = {}
     cases_out = []
     for case in catalog["cases"]:
         task_dir = tasks_dir / case["folder"]
-        titles.update(load_check_titles(task_dir))
+        meta.update(load_check_meta(task_dir))
         cases_out.append(
             {
                 "id": case["id"],
@@ -221,7 +336,12 @@ def build_report(
 
     if existing:
         for run in existing.get("runs") or []:
-            key = (run["caseId"], run["harness"], run["mcp"])
+            run = {
+                **run,
+                "surface": normalize_run_surface(run),
+                "mode": run.get("mode") if run.get("mode") in {"low", "high"} else "low",
+            }
+            key = (run["caseId"], run["harness"], run["surface"], run["mode"])
             agent_cells[key] = run
         for case in existing.get("cases") or []:
             if case.get("verifier"):
@@ -233,8 +353,9 @@ def build_report(
             if rec is None or rec["reward"] is None:
                 continue
             for fail in rec["failed"]:
-                if not fail["title"]:
-                    fail["title"] = titles.get(fail["id"], fail["id"])
+                info = describe_check(fail["id"], meta)
+                fail["title"] = info["title"]
+                fail["family"] = info["family"]
             if rec["agent"] == "oracle":
                 prev = oracles.get(rec["caseId"])
                 if prev is None or newer(rec, {"finished_at": prev.get("finished_at")}):
@@ -245,10 +366,12 @@ def build_report(
                         "finished_at": rec["finished_at"],
                     }
                 continue
-            key = (rec["caseId"], rec["agent"], rec["mcp"])
+            key = (rec["caseId"], rec["agent"], rec["surface"], rec["mode"])
             run = {
                 "caseId": rec["caseId"],
                 "harness": rec["agent"],
+                "surface": rec["surface"],
+                "mode": rec["mode"],
                 "mcp": rec["mcp"],
                 "reward": rec["reward"],
                 "passed": rec["passed"],
@@ -266,23 +389,29 @@ def build_report(
             if prev is None or newer(run, prev):
                 agent_cells[key] = run
 
-    fail_titles = {cid: {"title": title, "notes": ""} for cid, title in titles.items()}
+    for run in agent_cells.values():
+        details = []
+        for fail in run.get("failedDetail") or []:
+            info = describe_check(fail.get("id") or "", meta)
+            details.append({**fail, "title": info["title"], "family": info["family"]})
+        run["failedDetail"] = details
+
+    fail_titles = {
+        cid: {
+            "title": row["title"],
+            "family": row["family"],
+            "group": row["group"],
+            "notes": "",
+        }
+        for cid, row in meta.items()
+    }
     for case in cases_out:
         case["verifier"] = oracles.get(case["id"])
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "cases": cases_out,
-        "harnesses": [
-            {
-                "id": a["id"],
-                "name": a["name"],
-                "model": a["model"].split("/", 1)[-1],
-                "model_id": a["model"],
-                "tier": a["tier"],
-            }
-            for a in catalog["agents"]
-        ],
+        "harnesses": [harness_record(a) for a in catalog["agents"]],
         "fail_titles": fail_titles,
         "runs": list(agent_cells.values()),
     }

@@ -45,13 +45,43 @@ def yaml_quote(s: str) -> str:
     return s
 
 
+DEFAULT_SKILLS_SOURCE = (
+    "https://github.com/assistant-ui/skills/tree/main/assistant-ui/skills"
+)
+SURFACES = ("none", "mcp", "skills")
+SURFACE_ALIASES = {"on": "mcp", "off": "none", "skill": "skills"}
+MODES = ("low", "high")
+
+
+def env_for_surface(surface: str | None, mode: str | None) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    if surface == "none":
+        pairs.extend([("PB1_MCP", "off"), ("PB1_SURFACE", "none")])
+    elif surface == "skills":
+        pairs.extend([("PB1_MCP", "off"), ("PB1_SURFACE", "skills")])
+    elif surface == "mcp":
+        pairs.append(("PB1_SURFACE", "mcp"))
+    if mode in MODES:
+        pairs.append(("PB1_MODE", mode))
+    return pairs
+
+
+def emit_env_block(lines: list[str], pairs: list[tuple[str, str]]) -> None:
+    if not pairs:
+        return
+    lines.append("  env:")
+    for key, value in pairs:
+        lines.append(f"    {key}: {json.dumps(value)}")
+
+
 def emit_job(
     *,
     catalog: dict,
     cases: list[dict],
     agents: list[dict] | None,
     oracle: bool,
-    mcp: str | None,
+    surface: str | None,
+    mode: str | None,
     env_type: str,
     env_kwargs: dict[str, str],
     concurrent: int,
@@ -65,13 +95,12 @@ def emit_job(
         lines.append("extra_instruction_paths:")
         lines.append("  - scripts/detach-dev-server.md")
 
+    env_pairs = env_for_surface(surface, mode)
     lines.append("environment:")
     lines.append(f"  type: {yaml_quote(env_type)}")
     lines.append("  force_build: false")
     lines.append("  delete: true")
-    if mcp == "off":
-        lines.append("  env:")
-        lines.append('    PB1_MCP: "off"')
+    emit_env_block(lines, env_pairs)
     if env_kwargs:
         lines.append("  kwargs:")
         for k, v in env_kwargs.items():
@@ -81,10 +110,9 @@ def emit_job(
     lines.append("  include_logs:")
     lines.append('    - "*"')
     lines.append('    - "**/*"')
-    if mcp == "off":
-        lines.append("  env:")
-        lines.append('    PB1_MCP: "off"')
+    emit_env_block(lines, env_pairs)
 
+    skills_source = str(catalog.get("skills_source") or DEFAULT_SKILLS_SOURCE)
     lines.append("agents:")
     if oracle:
         lines.append("  - name: oracle")
@@ -93,6 +121,9 @@ def emit_job(
         for agent in agents:
             lines.append(f"  - name: {yaml_quote(agent['id'])}")
             lines.append(f"    model_name: {yaml_quote(agent['model'])}")
+            if surface == "skills":
+                lines.append("    skills:")
+                lines.append(f"      - {yaml_quote(skills_source)}")
 
     lines.append("tasks:")
     for case in cases:
@@ -124,6 +155,20 @@ def resolve_agents(catalog: dict, ids: list[str] | None) -> list[dict]:
     return out
 
 
+def apply_mode(agents: list[dict], mode: str) -> list[dict]:
+    if mode not in MODES:
+        die(f"--mode must be low or high, got {mode!r}")
+    out = []
+    for agent in agents:
+        spec = (agent.get("modes") or {}).get(mode) or {}
+        model = spec.get("model") or agent.get("model")
+        tier = spec.get("tier") or agent.get("tier")
+        if not model:
+            die(f"agent {agent.get('id')!r} has no model for mode {mode}")
+        out.append({**agent, "model": model, "tier": tier, "mode": mode})
+    return out
+
+
 def env_kwargs_for(catalog: dict, env_type: str, extra: list[str]) -> dict[str, str]:
     kwargs: dict[str, str] = {}
     if env_type == "blaxel":
@@ -140,15 +185,38 @@ def env_kwargs_for(catalog: dict, env_type: str, extra: list[str]) -> dict[str, 
     return kwargs
 
 
-def mcp_jobs(mcp_flag: str | None, command: str) -> list[str | None]:
+def parse_surfaces(value: str) -> list[str]:
+    if value.strip().lower() == "all":
+        return list(SURFACES)
+    out: list[str] = []
+    for raw in parse_csv(value):
+        name = SURFACE_ALIASES.get(raw.lower(), raw.lower())
+        if name not in SURFACES:
+            die(f"unknown surface {raw!r}. Use none, mcp, skills, or all.")
+        if name not in out:
+            out.append(name)
+    if not out:
+        die("--surface needs none, mcp, skills, or all")
+    return out
+
+
+def surface_jobs(
+    surface_flag: str | None,
+    mcp_flag: str | None,
+    command: str,
+) -> list[str | None]:
+    if command == "check-env-codeverifiers":
+        return [None]
+    if surface_flag:
+        return parse_surfaces(surface_flag)
     if command == "full-eval":
-        return ["on", "off"]
-    if mcp_flag in (None, "on"):
-        return [None if command == "check-env-codeverifiers" else "on"]
+        return list(SURFACES)
     if mcp_flag == "off":
-        return ["off"]
+        return ["none"]
     if mcp_flag == "both":
-        return ["on", "off"]
+        return ["mcp", "none"]
+    if mcp_flag in (None, "on"):
+        return ["mcp"]
     die("--mcp must be on, off, or both")
 
 
@@ -162,10 +230,10 @@ def write_and_maybe_run(
     run_dir = root / ".run"
     run_dir.mkdir(exist_ok=True)
     cfg = run_dir / "job.yaml"
-    cfg.write_text(yaml_text)
     if print_config or dry_run:
         sys.stdout.write(yaml_text)
         return cfg
+    cfg.write_text(yaml_text)
     env_file = root / ".env"
     cmd = ["harbor", "run", "--config", str(cfg), "-y"]
     if env_file.exists():
@@ -197,7 +265,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--cases", help="Comma-separated case ids (g1,g2). Default: all.")
     p.add_argument("--agents", help="Comma-separated agent ids. Default: all (not for oracle).")
-    p.add_argument("--mcp", choices=["on", "off", "both"], help="MCP surface. full-eval always both.")
+    p.add_argument(
+        "--surface",
+        help="none, mcp, skills (csv) or all. full-eval defaults to all three.",
+    )
+    p.add_argument(
+        "--mcp",
+        choices=["on", "off", "both"],
+        help="Alias: on=mcp, off=none, both=mcp+none. Ignored if --surface is set.",
+    )
     p.add_argument(
         "--env",
         dest="env_type",
@@ -211,7 +287,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="Passed into environment.kwargs. Repeatable.",
     )
-    p.add_argument("--concurrent", type=int, default=None)
+    p.add_argument(
+        "--mode",
+        choices=list(MODES),
+        default=None,
+        help="low = cheap models (Composer 2.5, Sonnet 5, Luna). high = Grok 4.6, Fable 5.1, Sol.",
+    )
+    p.add_argument(
+        "--concurrent",
+        type=int,
+        default=None,
+        help="Max Harbor trials in flight (sandbox concurrency). Default from catalog.",
+    )
     p.add_argument("--print-config", action="store_true", help="Print generated YAML and exit.")
     p.add_argument("--dry-run", action="store_true", help="Write YAML, do not call Harbor.")
     p.add_argument("--no-ingest", action="store_true")
@@ -223,7 +310,12 @@ def main(argv: list[str] | None = None) -> None:
     catalog = load_catalog()
     check_harbor(str(catalog["harbor_version"]))
     env_type = args.env_type or catalog["default_env"]
-    concurrent = args.concurrent or int(catalog["n_concurrent_trials"])
+    concurrent = args.concurrent if args.concurrent is not None else int(catalog["n_concurrent_trials"])
+    if concurrent < 1:
+        die("--concurrent must be >= 1")
+    mode = args.mode or str(catalog.get("default_mode") or "low")
+    if mode not in MODES:
+        die(f"--mode must be low or high, got {mode!r}")
     case_ids = parse_csv(args.cases)
     agent_ids = parse_csv(args.agents)
     cases = resolve_cases(catalog, case_ids or None)
@@ -233,19 +325,21 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "custom":
         if not case_ids or not agent_ids:
             die("custom requires --cases and --agents")
-        agents = resolve_agents(catalog, agent_ids)
+        agents = apply_mode(resolve_agents(catalog, agent_ids), mode)
     elif oracle:
         agents = None
     else:
-        agents = resolve_agents(catalog, agent_ids or None)
+        agents = apply_mode(resolve_agents(catalog, agent_ids or None), mode)
 
-    for mcp in mcp_jobs(args.mcp, args.command):
+    jobs = surface_jobs(args.surface, args.mcp, args.command)
+    for i, surface in enumerate(jobs):
         yaml_text = emit_job(
             catalog=catalog,
             cases=cases,
             agents=agents,
             oracle=oracle,
-            mcp=mcp,
+            surface=surface,
+            mode=mode if not oracle else None,
             env_type=env_type,
             env_kwargs=kwargs,
             concurrent=concurrent,
@@ -256,7 +350,7 @@ def main(argv: list[str] | None = None) -> None:
             dry_run=args.dry_run,
             root=ROOT,
         )
-        if args.print_config and mcp != mcp_jobs(args.mcp, args.command)[-1]:
+        if args.print_config and i < len(jobs) - 1:
             sys.stdout.write("---\n")
 
     if args.dry_run or args.no_ingest or args.print_config:

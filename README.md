@@ -22,8 +22,8 @@ code/workflow checks count **1**. Cascade skips count as fails.
 | Command | What it measures | When to use it |
 | --- | --- | --- |
 | `check-env-codeverifiers` | The **graders** still work. Runs the gold overlay (no coding agent). | After clone, after a grader change, before a big agent run. |
-| `full-eval` | **Agents.** G1–G11 × Cursor CLI / Claude Code / Codex × MCP on and off. | The product matrix. Expensive. |
-| `custom` | The same axes, but you pick cases / agents / MCP. | One case, one harness, a retry. |
+| `full-eval` | **Agents.** G1–G11 × Cursor CLI / Claude Code / Codex × none / MCP / skills. | The product matrix. Expensive. |
+| `custom` | The same axes, but you pick cases / agents / surface. | One case, one harness, a retry. |
 
 `check-env-codeverifiers` is not an agent score. Gold overlays call
 `npx assistant-ui@latest create`. If that template has moved since a
@@ -100,23 +100,26 @@ inspect that trial under `jobs/` before running agents.
 ./scripts/run.sh full-eval
 ```
 
-That is **11 cases × 3 agents × MCP on/off = 66 trials**, up to **10**
-at a time, on Blaxel. Budget hours and API spend. MCP on and MCP off
-are two sequential jobs (sandbox env is per job).
+That is **11 cases × 3 agents × 3 surfaces = 99 trials**, up to **10**
+at a time, on Blaxel. Budget hours and API spend. None / MCP / skills
+are three sequential jobs (sandbox env is per job).
 
 ### 3. A subset
 
 `custom` requires `--cases` and `--agents`.
 
 ```bash
-# One harness, MCP on, two cases.
-./scripts/run.sh custom --cases g1,g2 --agents cursor-cli --mcp on
+# One harness, MCP surface, two cases (low / cheap models).
+./scripts/run.sh custom --cases g1,g2 --agents cursor-cli --surface mcp --mode low
 
-# Three harnesses, one case, both MCP surfaces.
-./scripts/run.sh custom --cases g1 --agents cursor-cli,claude-code,codex --mcp both
+# High-tier models, 30 sandboxes in flight.
+./scripts/run.sh custom --cases g1 --agents cursor-cli,claude-code,codex --surface mcp --mode high --concurrent 30
+
+# Three harnesses, one case, skills only (MCP off + Harbor Agent Skills).
+./scripts/run.sh custom --cases g1 --agents cursor-cli,claude-code,codex --surface skills
 
 # Local Docker instead of Blaxel.
-./scripts/run.sh custom --cases g1 --agents cursor-cli --mcp on --env docker
+./scripts/run.sh custom --cases g1 --agents cursor-cli --surface mcp --env docker
 ```
 
 ### Flags (all commands)
@@ -125,9 +128,11 @@ are two sequential jobs (sandbox env is per job).
 | --- | --- | --- |
 | `--cases g1,g2` | all G1–G11 | Case ids from the table below |
 | `--agents cursor-cli,claude-code,codex` | all three | Ignored for `check-env-codeverifiers` |
-| `--mcp on\|off\|both` | `on` for `custom`; both for `full-eval` | Product docs tools vs web-docs-only |
+| `--surface none,mcp,skills\|all` | `mcp` for `custom`; all three for `full-eval` | Web docs / product MCP / Agent Skills |
+| `--mcp on\|off\|both` | alias for `--surface` | `on`=`mcp`, `off`=`none`, `both`=`mcp,none` |
+| `--mode low\|high` | `low` | Cheap vs expensive models (see table below) |
 | `--env blaxel\|docker\|…` | `blaxel` | Sandbox. Same name as Harbor’s `--env`. |
-| `--concurrent N` | `10` | Max trials in flight |
+| `--concurrent N` | `10` | Max Harbor trials / sandboxes in flight |
 | `--environment-kwarg KEY=VALUE` | Blaxel `region=us-pdx-1` | Extra sandbox kwargs; repeatable |
 | `--print-config` | | Print generated YAML and exit |
 | `--dry-run` | | Write YAML, do not start a run |
@@ -154,15 +159,26 @@ test them. Extra Harbor extras must already be installed.
 | `g10` | ChatGPT-like shell (sidebar + model selector) |
 | `g11` | Claude-like shell (sidebar + artifacts) |
 
-Pinned models: Cursor CLI `composer-2.5`, Claude Code `claude-sonnet-5`,
-Codex `gpt-5.6-luna`. MCP **on** = assistant-ui docs MCP. MCP **off** =
-web docs only (`PB1_MCP=off` on both the sandbox and the grader).
+Surfaces: **none** = web docs only (`PB1_MCP=off`); **mcp** = assistant-ui
+docs MCP; **skills** = MCP off plus Harbor Agent Skills from
+`assistant-ui/skills` on `main` (`PB1_SURFACE=skills` on both the
+sandbox and the grader). `PB1_MODE` is also set on both so ingest can
+keep low and high cells apart.
+
+| Mode | Cursor CLI | Claude Code | Codex |
+| --- | --- | --- | --- |
+| `low` (cheap, default) | `cursor/composer-2.5` | `anthropic/claude-sonnet-5` | `openai/gpt-5.6-luna` |
+| `high` | `cursor/grok-4.6` | `anthropic/claude-fable-5-1` | `openai/gpt-5.6-sol` |
 
 ## After a run
 
 1. Open **`report/index.html`** in a browser (`file://` is fine). Cells
    are score / agent time / API cost. Em dash means not run. Gold
-   oracles are a verifier badge on the case, not a harness row.
+   oracles are a verifier badge on the case, not a harness row. Failed
+   checks show a plain-language title first; the id (`BR-06`, `WF-S-01`)
+   is a tag. Prefixes: **CQ** source, **AR** app run, **BR** browser,
+   **WF-D** docs/MCP/skills, **WF-S** `create` scaffold, **WF-E** errors
+   during the agent run, **WF-T** agent started and tested the app.
 2. Raw trials land in **`jobs/`** (gitignored). Keep that folder; do
    not commit dumps.
 3. Ingest merges the new job into `report/` so the next clone still

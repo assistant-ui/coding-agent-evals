@@ -11,7 +11,9 @@ from pathlib import Path
 # Job YAML: set on both environment.env and verifier.env. Harbor does not
 # copy sandbox env into the verifier. Default on (omit or any value except off).
 MCP_ENV_KEY = "PB1_MCP"
+SURFACE_ENV_KEY = "PB1_SURFACE"
 _MCP_OFF = frozenset({"off", "0", "false", "no", "disabled"})
+_SURFACE_SKILLS = frozenset({"skills", "skill", "on"})
 
 PYTEST_ID_RE = re.compile(
     r"^test_(?P<body>.+?)(?:\[.*\])?$",
@@ -51,7 +53,7 @@ CHECKS: tuple[Check, ...] = (
     Check("BR-05", "Mastra-backed reply, missing-config, or in-flight turn after send", "browser"),
     Check(
         "WF-D-01",
-        "Used assistant-ui MCP or web docs (per PB1_MCP)",
+        "Used assistant-ui MCP, skills, or web docs (per surface)",
         "workflow",
         True,
         True,
@@ -80,6 +82,13 @@ def mcp_enabled() -> bool:
     if not raw:
         return True
     return raw not in _MCP_OFF
+
+
+def skills_enabled() -> bool:
+    """True when the job is the Harbor Agent Skills surface."""
+    raw = os.environ.get(SURFACE_ENV_KEY, "").strip().lower()
+    return raw in _SURFACE_SKILLS
+
 
 
 # WF-E-* skip on missing create/build attempt in judge/run.py, not on no app.

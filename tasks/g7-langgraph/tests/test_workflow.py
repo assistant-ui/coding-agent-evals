@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from checks import mcp_enabled
+from checks import mcp_enabled, skills_enabled
 from lib.transcript import (
     KNOWN_AGENTS,
     ToolCallRecord,
@@ -106,6 +106,17 @@ DOCS_CURL_RE = re.compile(
     re.I,
 )
 
+# Harbor copies skills to each agent's native dir (and /harbor/skills).
+SKILL_DIR_RE = re.compile(
+    r"(?:^|/)(?:\.cursor/skills|\.claude/skills|\.agents/skills|harbor/skills)/",
+    re.I,
+)
+SKILL_FILE_RE = re.compile(
+    r"(?:^|/)(?:\.cursor/skills|\.claude/skills|\.agents/skills|harbor/skills)/"
+    r"[^/\s\"']+/(?:SKILL\.md|references/)",
+    re.I,
+)
+
 
 def used_assistant_ui_mcp(records: list[ToolCallRecord]) -> bool:
     for record in records:
@@ -161,6 +172,35 @@ def is_web_doc_read(record: ToolCallRecord) -> bool:
         record.name == "shell"
         and record.command
         and DOCS_CURL_RE.search(record.command)
+    )
+
+
+def _skill_blob(record: ToolCallRecord) -> str:
+    parts = [record.path or "", record.command or ""]
+    skill = record.input.get("skill") if record.input else None
+    if skill:
+        parts.append(str(skill))
+    return "\n".join(parts)
+
+
+def is_skill_read(record: ToolCallRecord) -> bool:
+    """Read an injected assistant-ui skill (SKILL.md, reference, or Skill tool)."""
+    if record.name == "skill_use" or (record.original_name or "") == "Skill":
+        return bool(str((record.input or {}).get("skill") or "").strip())
+    if record.name == "file_read" and record.path and SKILL_DIR_RE.search(record.path):
+        return True
+    if record.name == "shell" and record.command and SKILL_FILE_RE.search(record.command):
+        return True
+    return bool(SKILL_FILE_RE.search(_skill_blob(record)))
+
+
+def used_assistant_ui_skill(records: list[ToolCallRecord]) -> bool:
+    return any(is_skill_read(record) for record in records)
+
+
+def skills_or_web_docs_before_scaffold_or_write(records: list[ToolCallRecord]) -> bool:
+    return _docs_before_change(
+        records, lambda rec: is_skill_read(rec) or is_web_doc_read(rec)
     )
 
 
@@ -277,17 +317,23 @@ def records() -> list[ToolCallRecord]:
 
 
 def test_wf_d_01_used_mcp(records: list[ToolCallRecord]) -> None:
-    """WF-D-01 Used assistant-ui MCP or web docs (per PB1_MCP)."""
+    """WF-D-01 Used assistant-ui MCP, skills, or web docs (per surface)."""
     if mcp_enabled():
         assert used_assistant_ui_mcp(records)
+        return
+    if skills_enabled():
+        assert used_assistant_ui_skill(records) or used_web_docs(records)
         return
     assert used_web_docs(records)
 
 
 def test_wf_d_02_docs_before_write(records: list[ToolCallRecord]) -> None:
-    """WF-D-02 Read docs / examples before first scaffold or write."""
+    """WF-D-02 Read docs / skills / examples before first scaffold or write."""
     if mcp_enabled():
         assert docs_before_scaffold_or_write(records)
+        return
+    if skills_enabled():
+        assert skills_or_web_docs_before_scaffold_or_write(records)
         return
     assert web_docs_before_scaffold_or_write(records)
 

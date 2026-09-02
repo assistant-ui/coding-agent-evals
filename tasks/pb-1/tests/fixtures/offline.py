@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from checks import mcp_enabled
+from checks import mcp_enabled, skills_enabled
 from lib.transcript import (
+    ToolCallRecord,
     SPILLED_MARKER,
     adapt_transcript,
     compact_transcript_from_atif,
@@ -32,8 +33,11 @@ from test_workflow import (
     listed_example_create,
     successful_create,
     used_assistant_ui_mcp,
+    used_assistant_ui_skill,
     used_web_docs,
+    is_skill_read,
     is_web_doc_read,
+    skills_or_web_docs_before_scaffold_or_write,
     web_docs_before_scaffold_or_write,
 )
 
@@ -1064,6 +1068,74 @@ def test_mcp_enabled_defaults_on(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mcp_enabled() is False
     monkeypatch.setenv("PB1_MCP", "false")
     assert mcp_enabled() is False
+
+
+def test_skills_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PB1_SURFACE", raising=False)
+    assert skills_enabled() is False
+    monkeypatch.setenv("PB1_SURFACE", "skills")
+    assert skills_enabled() is True
+    monkeypatch.setenv("PB1_SURFACE", "SKILL")
+    assert skills_enabled() is True
+    monkeypatch.setenv("PB1_SURFACE", "none")
+    assert skills_enabled() is False
+
+
+def _rec(**kwargs) -> ToolCallRecord:
+    base = dict(seq=1, event_id="e", name="unknown", original_name="x", call_id="c")
+    base.update(kwargs)
+    return ToolCallRecord(**base)
+
+
+def test_used_assistant_ui_skill_cursor_read() -> None:
+    records = [
+        _rec(
+            name="file_read",
+            original_name="readToolCall",
+            path="/root/.cursor/skills/setup/SKILL.md",
+        )
+    ]
+    assert is_skill_read(records[0])
+    assert used_assistant_ui_skill(records)
+
+
+def test_used_assistant_ui_skill_codex_sed() -> None:
+    records = [
+        _rec(
+            seq=1,
+            name="shell",
+            original_name="exec",
+            command="sed -n '1,240p' /root/.agents/skills/assistant-ui/SKILL.md",
+        ),
+        _rec(
+            seq=2,
+            name="shell",
+            original_name="exec",
+            command="npx assistant-ui@latest create app --example with-ai-sdk-v7 --use-npm --no-skills",
+        ),
+    ]
+    assert used_assistant_ui_skill(records)
+    assert skills_or_web_docs_before_scaffold_or_write(records)
+
+
+def test_used_assistant_ui_skill_claude_tool() -> None:
+    records = [
+        _rec(
+            name="skill_use",
+            original_name="Skill",
+            input={"skill": "setup", "args": "assistant-ui basic setup guide"},
+        )
+    ]
+    assert used_assistant_ui_skill(records)
+
+
+def test_create_no_skills_flag_is_not_a_skill_read() -> None:
+    rec = _rec(
+        name="shell",
+        original_name="exec",
+        command="npx assistant-ui@latest create app --example with-ai-sdk-v7 --no-skills",
+    )
+    assert not is_skill_read(rec)
 
 
 def test_report_scores_discovery_when_mcp_off(

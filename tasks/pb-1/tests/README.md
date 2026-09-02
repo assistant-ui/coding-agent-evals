@@ -10,7 +10,7 @@ Layout follows
 | `report.py` | Gates + JUnit → `checks.json` + weighted `reward.txt` (`AR`/`BR` weight 2; else 1) |
 | `lib/workspace.py` | Find `package.json`, grep packages/source (skips `.agents`) |
 | `lib/transcript.py` | Cursor ATIF → supabase-named events → compact transcript. Codex Harbor `exec` unwraps `tools.exec_command({cmd})` the same way supabase reads `item.command`; TTY sessions copy `write_stdin` `exit_code` onto the opening command. Claude Harbor `Bash` reads `result.extra` `is_error` (no integer `exitCode`). |
-| `test_workflow.py` | WF-D-* / WF-S-* (skip on gold; WF-D-* uses MCP or web docs per `PB1_MCP`) |
+| `test_workflow.py` | WF-D-* / WF-S-* (skip on gold; WF-D-* uses MCP, skills, or web docs per surface) |
 | `test_code.py` | CQ-G-* / CQ-P-* |
 | `test_apprun.py` | AR-04 POST `/api/chat` |
 | `test_browser.py` | BR-01–BR-06. BR-06 waits for the run to finish (Stop → Send visible), reloads, and checks the user text is still in the thread. Does not require a `localStorage` key. |
@@ -27,7 +27,11 @@ MCP-off: set `PB1_MCP=off` on both job `environment.env` and `verifier.env`
 or fetch of `llms.txt` / `assistant-ui.com/docs` (Codex `tools.web__run`
 search then `open`). Search hits without an open/fetch/curl fail WF-D-02.
 Harbor still lists the MCP server; the stdio command no-ops so the agent has
-no assistant-ui tools. Default is `on` (MCP discovery).
+no assistant-ui tools. Default is `on` (MCP discovery). Skills surface:
+set `PB1_MCP=off` and `PB1_SURFACE=skills` on both env blocks, and inject
+Harbor `agents[].skills`. WF-D then accepts a skill read (`Skill` tool,
+`file_read` of `~/.cursor/skills` / `~/.agents/skills`, or `sed`/`cat` of
+`SKILL.md`) or web docs.
 
 Judge API key: Harbor `[verifier.env]` injects `OPENAI_API_KEY` from the host
 `--env-file` (`evals/assistant-ui/app-evals/.env`). `test.sh` pip-installs

@@ -1,7 +1,9 @@
 {
   "harbor_version": "0.20",
   "default_env": "blaxel",
+  "default_mode": "low",
   "n_concurrent_trials": 10,
+  "skills_source": "https://github.com/assistant-ui/skills/tree/main/assistant-ui/skills",
   "blaxel": {
     "region": "us-pdx-1",
     "deployment_timeout_sec": 7200
@@ -11,19 +13,49 @@
       "id": "cursor-cli",
       "name": "Cursor CLI",
       "model": "cursor/composer-2.5",
-      "tier": "Composer 2.5"
+      "tier": "Composer 2.5",
+      "modes": {
+        "low": {
+          "model": "cursor/composer-2.5",
+          "tier": "Composer 2.5"
+        },
+        "high": {
+          "model": "cursor/grok-4.6",
+          "tier": "Grok 4.6"
+        }
+      }
     },
     {
       "id": "claude-code",
       "name": "Claude Code",
       "model": "anthropic/claude-sonnet-5",
-      "tier": "Sonnet 5"
+      "tier": "Sonnet 5",
+      "modes": {
+        "low": {
+          "model": "anthropic/claude-sonnet-5",
+          "tier": "Sonnet 5"
+        },
+        "high": {
+          "model": "anthropic/claude-fable-5-1",
+          "tier": "Fable 5.1"
+        }
+      }
     },
     {
       "id": "codex",
       "name": "Codex",
       "model": "openai/gpt-5.6-luna",
-      "tier": "GPT-5.6 Luna"
+      "tier": "GPT-5.6 Luna",
+      "modes": {
+        "low": {
+          "model": "openai/gpt-5.6-luna",
+          "tier": "GPT-5.6 Luna"
+        },
+        "high": {
+          "model": "openai/gpt-5.6-sol",
+          "tier": "GPT-5.6 Sol"
+        }
+      }
     }
   ],
   "cases": [

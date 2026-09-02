@@ -23,7 +23,7 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font); }
     button { font: inherit; color: inherit; }
-    .page { max-width: 1280px; margin: 0 auto; padding: 48px 24px 96px; }
+    .page { max-width: 1480px; margin: 0 auto; padding: 48px 24px 96px; }
     .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: end; padding-bottom: 40px; }
     .hero h1 { margin: 0; font-size: 44px; font-weight: 500; letter-spacing: -0.04em; line-height: 1.05; }
     .hero h1 span { display: block; color: var(--muted-fg); }
@@ -123,7 +123,8 @@
     .checks li { display: grid; grid-template-columns: 8px 1fr; gap: 10px; align-items: start; }
     .dot { width: 8px; height: 8px; border-radius: 99px; margin-top: 6px; background: var(--fail); }
     .fail-title { display: block; font-weight: 500; }
-    .notes { display: block; color: var(--muted-fg); margin-top: 3px; }
+    .fail-id { display: block; color: var(--muted-fg); font-family: var(--mono); font-size: 11px; margin-top: 2px; }
+    .notes { display: block; color: var(--muted-fg); margin-top: 6px; white-space: pre-wrap; max-height: 160px; overflow: auto; }
     .ok { color: var(--muted-fg); margin: 12px 0 0; }
     .copy-btn {
       margin-top: 12px; border: 1px solid var(--border); background: var(--card);
@@ -141,7 +142,7 @@
   <div class="page">
     <header class="hero">
       <h1>Evaluating agents<span>across assistant-ui</span></h1>
-      <p id="hero-copy">How well coding agents build real assistant-ui apps, with product docs tools on and off.</p>
+      <p id="hero-copy">How well coding agents build real assistant-ui apps across none / MCP / skills surfaces.</p>
     </header>
     <section class="table-card" aria-label="Results">
       <div class="toolbar">
@@ -149,7 +150,11 @@
           <button type="button" id="view-harness" aria-pressed="true">Group by harness</button>
           <button type="button" id="view-case" aria-pressed="false">Group by case</button>
         </div>
-        <span class="hint">Time is agent runtime. Cost is model API spend. Em dash means not run.</span>
+        <div class="seg" role="group" aria-label="Model mode">
+          <button type="button" id="mode-low" aria-pressed="true">Low</button>
+          <button type="button" id="mode-high" aria-pressed="false">High</button>
+        </div>
+        <span class="hint">Low is Composer 2.5 / Sonnet 5 / Luna. High is Grok 4.6 / Fable 5.1 / Sol. Time is agent runtime. Cost is model API spend. Em dash means not run.</span>
       </div>
       <div class="scroll" id="table-root"></div>
     </section>
@@ -170,15 +175,46 @@
     }
     const CASES = REPORT.cases;
     const HARNESSES = REPORT.harnesses;
-    const RUNS = REPORT.runs || [];
+    const SURFACES = ["none", "mcp", "skills"];
+    const SURFACE_LABEL = { none: "None", mcp: "MCP", skills: "Skills" };
+    const SURFACE_LONG = {
+      none: "web docs only",
+      mcp: "with product docs MCP",
+      skills: "with assistant-ui Agent Skills",
+    };
+    function normalizeSurface(run) {
+      if (run.surface === "none" || run.surface === "mcp" || run.surface === "skills") return run.surface;
+      if (run.mcp === "off") return "none";
+      if (run.mcp === "skills") return "skills";
+      return "mcp";
+    }
+    function normalizeMode(run) {
+      return run.mode === "high" ? "high" : "low";
+    }
+    const ALL_RUNS = (REPORT.runs || []).map((r) => ({
+      ...r,
+      surface: normalizeSurface(r),
+      mode: normalizeMode(r),
+    }));
     const FAIL = REPORT.fail_titles || {};
     document.getElementById("hero-copy").textContent =
-      "How well coding agents build real assistant-ui apps, with product docs tools on and off. Grid from " +
+      "How well coding agents build real assistant-ui apps across none / MCP / skills. Toggle low vs high models. Grid from " +
       (REPORT.generated_at || "ingest") + ".";
 
     const $ = (id) => document.getElementById(id);
     let view = "harness";
+    let mode = "low";
     const openHarness = new Set();
+    function RUNS() {
+      return ALL_RUNS.filter((r) => r.mode === mode);
+    }
+    function harnessMeta(h) {
+      const spec = (h.modes && h.modes[mode]) || {};
+      return {
+        model: spec.model || h.model,
+        tier: spec.tier || h.tier,
+      };
+    }
 
     function fmtPct(n) { return (n * 100).toFixed(1) + "%"; }
     function fmtTime(sec) {
@@ -193,15 +229,15 @@
       if (n >= 0.8) return "mid";
       return "lo";
     }
-    function runOf(caseId, harness, mcp) {
-      return RUNS.find((r) => r.caseId === caseId && r.harness === harness && r.mcp === mcp);
+    function runOf(caseId, harness, surface) {
+      return RUNS().find((r) => r.caseId === caseId && r.harness === harness && r.surface === surface);
     }
     function mean(nums) {
       const xs = nums.filter((n) => n != null);
       return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
     }
-    function surfaceAvg(harness, mcp) {
-      const runs = CASES.map((c) => runOf(c.id, harness, mcp)).filter(Boolean);
+    function surfaceAvg(harness, surface) {
+      const runs = CASES.map((c) => runOf(c.id, harness, surface)).filter(Boolean);
       if (!runs.length) return null;
       return {
         reward: mean(runs.map((r) => r.reward)),
@@ -228,10 +264,9 @@
       </button>`;
     }
     function renderHarnessView() {
-      const head = `<tr><th>Harness</th><th>MCP on</th><th>MCP off</th></tr>`;
+      const head = `<tr><th>Harness</th>${SURFACES.map((s) => `<th>${SURFACE_LABEL[s]}</th>`).join("")}</tr>`;
       const body = HARNESSES.map((h) => {
-        const on = surfaceAvg(h.id, "on");
-        const off = surfaceAvg(h.id, "off");
+        const avgs = Object.fromEntries(SURFACES.map((s) => [s, surfaceAvg(h.id, s)]));
         const expanded = openHarness.has(h.id);
         const parent = `<tr class="avg-row${expanded ? " open" : ""}">
           <th>
@@ -239,18 +274,16 @@
               <span class="chevron"></span>
               <span>
                 <span class="harness">${h.name}</span>
-                <span class="model">${h.model} · ${h.tier}</span>
+                <span class="model">${harnessMeta(h).model} · ${harnessMeta(h).tier}</span>
               </span>
             </button>
           </th>
-          <td>${cellHtml(on, `avg|${h.id}|on`, { summary: true })}</td>
-          <td>${cellHtml(off, `avg|${h.id}|off`, { summary: true })}</td>
+          ${SURFACES.map((s) => `<td>${cellHtml(avgs[s], `avg|${h.id}|${s}`, { summary: true })}</td>`).join("")}
         </tr>`;
         if (!expanded) return parent;
         const kids = CASES.map((c) => `<tr class="child">
           <th><span class="child-label">${caseLabel(c)}</span></th>
-          <td>${cellHtml(runOf(c.id, h.id, "on"), `run|${c.id}|${h.id}|on`)}</td>
-          <td>${cellHtml(runOf(c.id, h.id, "off"), `run|${c.id}|${h.id}|off`)}</td>
+          ${SURFACES.map((s) => `<td>${cellHtml(runOf(c.id, h.id, s), `run|${c.id}|${h.id}|${s}`)}</td>`).join("")}
         </tr>`).join("");
         return parent + kids;
       }).join("");
@@ -258,15 +291,15 @@
     }
     function renderCaseView() {
       const group = HARNESSES.map((h) =>
-        `<th class="group" colspan="2">${h.name}<div class="model">${h.model}</div></th>`
+        `<th class="group" colspan="3">${h.name}<div class="model">${harnessMeta(h).model}</div></th>`
       ).join("");
-      const subs = HARNESSES.map(() => `<th class="sub">MCP on</th><th class="sub">MCP off</th>`).join("");
-      const avgCells = HARNESSES.flatMap((h) => ["on", "off"].map((mcp) =>
-        `<td>${cellHtml(surfaceAvg(h.id, mcp), `avg|${h.id}|${mcp}`, { summary: true })}</td>`
+      const subs = HARNESSES.map(() => SURFACES.map((s) => `<th class="sub">${SURFACE_LABEL[s]}</th>`).join("")).join("");
+      const avgCells = HARNESSES.flatMap((h) => SURFACES.map((surface) =>
+        `<td>${cellHtml(surfaceAvg(h.id, surface), `avg|${h.id}|${surface}`, { summary: true })}</td>`
       )).join("");
       const caseRows = CASES.map((c) => {
-        const cells = HARNESSES.flatMap((h) => ["on", "off"].map((mcp) =>
-          `<td>${cellHtml(runOf(c.id, h.id, mcp), `run|${c.id}|${h.id}|${mcp}`)}</td>`
+        const cells = HARNESSES.flatMap((h) => SURFACES.map((surface) =>
+          `<td>${cellHtml(runOf(c.id, h.id, surface), `run|${c.id}|${h.id}|${surface}`)}</td>`
         )).join("");
         return `<tr>
           <th><span class="child-label" style="padding-left:12px">${caseLabel(c)}</span></th>
@@ -298,35 +331,57 @@
       ov.classList.remove("open");
       ov.hidden = true;
     }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+    function familyOf(id) {
+      if (id.startsWith("CQ-G")) return "Source · app skeleton";
+      if (id.startsWith("CQ-P")) return "Source · product wiring";
+      if (id.startsWith("CQ")) return "Source";
+      if (id.startsWith("AR")) return "App run · install / build / HTTP";
+      if (id.startsWith("BR")) return "Browser · Playwright";
+      if (id.startsWith("WF-D")) return "Workflow · discovery (docs / MCP / skills)";
+      if (id.startsWith("WF-S")) return "Workflow · scaffold (assistant-ui create)";
+      if (id.startsWith("WF-E")) return "Workflow · errors during the agent run";
+      if (id.startsWith("WF-T")) return "Workflow · agent started and tested the app";
+      if (id.startsWith("WF")) return "Workflow";
+      return "";
+    }
     function failList(run) {
       const details = run.failedDetail || (run.failed || []).map((id) => ({ id, title: "", notes: "" }));
       return details.map((item) => {
         const f = FAIL[item.id] || {};
-        const title = item.title || f.title || item.id;
+        const rawTitle = item.title || f.title || "";
+        const title = rawTitle && rawTitle !== item.id ? rawTitle : item.id;
+        const family = item.family || f.family || familyOf(item.id);
         const notes = item.notes || f.notes || "";
+        const idLine = [family, item.id].filter(Boolean).join(" · ");
         return `<li>
           <span class="dot"></span>
           <span>
-            <span class="fail-title">${title}</span>
-            ${notes ? `<span class="notes">${notes}</span>` : ""}
+            <span class="fail-title">${esc(title)}</span>
+            ${idLine ? `<span class="fail-id">${esc(idLine)}</span>` : ""}
+            ${notes ? `<span class="notes">${esc(notes)}</span>` : ""}
           </span>
         </li>`;
       }).join("");
     }
-    function runSheet(run, caseMeta, harness, mcp) {
+    function runSheet(run, caseMeta, harness, surface) {
       const h = HARNESSES.find((x) => x.id === harness);
-      const mcpLabel = mcp === "on" ? "with product docs tools" : "without product docs tools";
+      const mcpLabel = SURFACE_LONG[surface] || surface;
       return `
         <div class="sheet-top">
           <div>
-            <p class="sheet-kicker">${h.name} · ${h.model} · ${mcpLabel}</p>
+            <p class="sheet-kicker">${h.name} · ${harnessMeta(h).model} · ${mode} · ${mcpLabel}</p>
             <h2 id="sheet-title">${caseMeta.name}</h2>
           </div>
           <div class="sheet-stats">
             <div class="score ${scoreClass(run.reward)}">${fmtPct(run.reward)}</div>
             <div>${run.passed} of ${run.applicable} checks passed</div>
             <div>${fmtTime(run.agentSec)} · ${fmtCost(run.cost)}</div>
-            <button type="button" class="copy-btn" data-copy="${caseMeta.id}|${harness}|${mcp}">Copy for investigation</button>
+            <button type="button" class="copy-btn" data-copy="${caseMeta.id}|${harness}|${surface}">Copy for investigation</button>
           </div>
         </div>
         <dl class="dl">
@@ -341,14 +396,15 @@
           </dd>
         </dl>`;
     }
-    function investigationBrief(run, caseMeta, harness, mcp) {
+    function investigationBrief(run, caseMeta, harness, surface) {
       const h = HARNESSES.find((x) => x.id === harness);
-      const surface = mcp === "on"
-        ? "Product docs tools ON (assistant-ui MCP)"
-        : "Product docs tools OFF (web docs only)";
+      const surfaceName = SURFACE_LONG[surface] || surface;
       const fails = (run.failedDetail || []).map((item) => {
         const f = FAIL[item.id] || {};
-        return `- ${item.title || f.title || item.id}\n  ${item.notes || ""}`.trim();
+        const rawTitle = item.title || f.title || "";
+        const title = rawTitle && rawTitle !== item.id ? rawTitle : item.id;
+        const family = item.family || f.family || familyOf(item.id);
+        return `- ${title} (${[family, item.id].filter(Boolean).join(" · ")})\n  ${item.notes || ""}`.trim();
       }).join("\n");
       return `Investigate why this coding agent scored poorly on an assistant-ui app-building eval.
 
@@ -356,8 +412,8 @@ Case: ${caseMeta.name}
 User prompt:
 ${caseMeta.prompt}
 
-Agent: ${h.name} (${h.model})
-Surface: ${surface}
+Agent: ${h.name} (${harnessMeta(h).model}, ${mode} mode)
+Surface: ${surfaceName}
 Score: ${fmtPct(run.reward)} (${run.passed} of ${run.applicable} checks passed)
 Agent runtime: ${fmtTime(run.agentSec)}
 API cost: ${fmtCost(run.cost)}
@@ -370,28 +426,28 @@ ${fails || "- (none listed)"}
 
 ${run.passed} other checks passed.`;
     }
-    function avgSheet(harness, mcp) {
+    function avgSheet(harness, surface) {
       const h = HARNESSES.find((x) => x.id === harness);
-      const mcpLabel = mcp === "on" ? "with product docs tools" : "without product docs tools";
+      const mcpLabel = SURFACE_LONG[surface] || surface;
       const rows = CASES.map((c) => {
-        const run = runOf(c.id, harness, mcp);
+        const run = runOf(c.id, harness, surface);
         if (!run) {
           return `<div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);color:var(--muted-fg)">
             <span>${c.name}</span><span>—</span>
           </div>`;
         }
-        return `<button type="button" class="cell-btn" style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)" data-open="run|${c.id}|${harness}|${mcp}">
+        return `<button type="button" class="cell-btn" style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)" data-open="run|${c.id}|${harness}|${surface}">
           <span>${c.name}<span class="model">${(run.failed || []).length} failed</span></span>
           <span class="score ${scoreClass(run.reward)}">${fmtPct(run.reward)}</span>
         </button>`;
       }).join("");
-      const avg = surfaceAvg(harness, mcp);
+      const avg = surfaceAvg(harness, surface);
       return `
         <div class="sheet-top">
           <div>
             <p class="sheet-kicker">${mcpLabel}</p>
             <h2 id="sheet-title">${h.name}</h2>
-            <p class="model">${h.model} · average across cases with results</p>
+            <p class="model">${harnessMeta(h).model} · ${mode} · average across cases with results</p>
           </div>
           <div class="sheet-stats">
             ${avg ? `<div class="score ${scoreClass(avg.reward)}">${fmtPct(avg.reward)}</div>` : ""}
@@ -414,6 +470,14 @@ ${run.passed} other checks passed.`;
       $("view-case").setAttribute("aria-pressed", "true");
       render();
     };
+    function setMode(next) {
+      mode = next;
+      $("mode-low").setAttribute("aria-pressed", next === "low" ? "true" : "false");
+      $("mode-high").setAttribute("aria-pressed", next === "high" ? "true" : "false");
+      render();
+    }
+    $("mode-low").onclick = () => setMode("low");
+    $("mode-high").onclick = () => setMode("high");
     $("close").onclick = closeSheet;
     $("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeSheet(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
