@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write named Harbor checks and equal-1 pass-rate reward from gates + pytest."""
+"""Write named Harbor checks and weighted pass-rate reward from gates + pytest."""
 
 from __future__ import annotations
 
@@ -16,6 +16,13 @@ _PLANNED_NA_PREFIXES = (
     "no assistant-ui create command",
     "no TypeScript or package build command",
 )
+
+# App-run + browser product checks count double vs code/workflow.
+_DOUBLE_WEIGHT_PREFIXES = ("AR-", "BR-")
+
+
+def check_weight(check_id: str) -> int:
+    return 2 if check_id.startswith(_DOUBLE_WEIGHT_PREFIXES) else 1
 
 
 def is_planned_na(check: dict[str, object]) -> bool:
@@ -40,10 +47,22 @@ def normalize_runtime_skips(
     return out
 
 
+def annotate_weights(
+    checks: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for check in checks:
+        row = dict(check)
+        name = str(row.get("name") or "")
+        row["weight"] = int(row.get("weight") or check_weight(name))
+        out.append(row)
+    return out
+
+
 def write_results(
     checks_path: Path, reward_path: Path, checks: list[dict[str, object]]
 ) -> None:
-    checks = normalize_runtime_skips(checks)
+    checks = annotate_weights(normalize_runtime_skips(checks))
     checks_path.write_text(json.dumps({"checks": checks}, indent=2) + "\n")
     if any(check.get("status") == "error" for check in checks):
         if reward_path.exists():
@@ -53,8 +72,11 @@ def write_results(
     if not applicable:
         reward_path.write_text("0.0000\n")
         return
-    n_passed = sum(1 for check in applicable if check.get("passed"))
-    reward_path.write_text(f"{n_passed / len(applicable):.4f}\n")
+    weight_total = sum(int(check["weight"]) for check in applicable)
+    weight_passed = sum(
+        int(check["weight"]) for check in applicable if check.get("passed")
+    )
+    reward_path.write_text(f"{weight_passed / weight_total:.4f}\n")
 
 
 def _junit_rows(path: Path) -> dict[str, dict[str, object]]:

@@ -1040,7 +1040,7 @@ def test_pass_rate_reward(tmp_path: Path) -> None:
             {"name": "BR-06", "passed": False},
         ],
     )
-    assert reward_path.read_text() == "0.5000\n"
+    assert reward_path.read_text() == "0.3333\n"
     write_results(
         checks_path,
         reward_path,
@@ -1060,7 +1060,7 @@ def test_pass_rate_reward(tmp_path: Path) -> None:
             },
         ],
     )
-    assert reward_path.read_text() == "0.3333\n"
+    assert reward_path.read_text() == "0.2000\n"
     write_results(
         checks_path,
         reward_path,

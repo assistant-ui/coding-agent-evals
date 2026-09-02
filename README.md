@@ -16,6 +16,9 @@ Each case is a product prompt (build this assistant-ui app). Graders
 check source, build, runtime, browser behavior, and — for coding agents
 — whether they used docs / the create CLI.
 
+**Reward weights:** `AR-*` (app run) and `BR-*` (browser) count **2**;
+code/workflow checks count **1**. Cascade skips count as fails.
+
 | Command | What it measures | When to use it |
 | --- | --- | --- |
 | `check-env-codeverifiers` | The **graders** still work. Runs the gold overlay (no coding agent). | After clone, after a grader change, before a big agent run. |

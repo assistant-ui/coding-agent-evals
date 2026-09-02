@@ -13,7 +13,7 @@ Layout follows
 | --- | --- |
 | `test.sh` | Workflow + judge (agent jobs), pytest code, install/build/start, AR-04 + browser, `reward.txt` |
 | `checks.py` | Line-item catalog + gate skip |
-| `report.py` | Gates + JUnit → `checks.json` + float `reward.txt` (`n_passed / n_applicable`; skipped out of the denominator; error omits reward) |
+| `report.py` | Gates + JUnit → `checks.json` + weighted `reward.txt` (`AR`/`BR` weight 2; else 1) |
 | `lib/workspace.py` | Find `package.json`, grep packages/source (skips `.agents`) |
 | `lib/transcript.py` | Cursor ATIF → supabase-named events → compact transcript. Codex Harbor `exec` unwraps `tools.exec_command({cmd})` the same way supabase reads `item.command`; TTY sessions copy `write_stdin` `exit_code` onto the opening command. Claude Harbor `Bash` reads `result.extra` `is_error` (no integer `exitCode`). |
 | `test_workflow.py` | WF-D-* / WF-S-* (skip on gold; WF-D-* uses MCP or web docs per `PB1_MCP`) |

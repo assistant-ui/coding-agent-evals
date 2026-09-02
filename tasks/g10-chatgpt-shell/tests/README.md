@@ -7,7 +7,7 @@ Layout follows
 | --- | --- |
 | `test.sh` | Workflow + judge (agent jobs), pytest code, install/build/start, AR-04 + browser, `reward.txt` |
 | `checks.py` | Line-item catalog + gate skip |
-| `report.py` | Gates + JUnit → `checks.json` + float `reward.txt` |
+| `report.py` | Gates + JUnit → `checks.json` + weighted `reward.txt` (`AR`/`BR` weight 2; else 1) |
 | `lib/workspace.py` | Find app; `THREAD_A_TEXT` / `THREAD_B_TEXT` / `MODEL_PROBE_TEXT` |
 | `test_workflow.py` | WF-D-* / WF-S-* (skip on gold). WF-S-02 accepts `--example` or `-t default` |
 | `test_code.py` | CQ-G-* / CQ-P-* (sidebar + ModelSelector/`modelName`; no Cloud CQ-P-06) |

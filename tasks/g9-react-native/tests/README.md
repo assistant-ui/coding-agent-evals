@@ -7,7 +7,7 @@ Layout follows
 | --- | --- |
 | `test.sh` | Workflow + judge (agent jobs), pytest code, install, Expo export, `expo start --web`, AR-04 + browser, `reward.txt` |
 | `checks.py` | Line-item catalog + gate skip |
-| `report.py` | Gates + JUnit → `checks.json` + float `reward.txt` |
+| `report.py` | Gates + JUnit → `checks.json` + weighted `reward.txt` (`AR`/`BR` weight 2; else 1) |
 | `lib/workspace.py` | Find app; `CHAT_USER_TEXT` weather prompt |
 | `test_workflow.py` | WF-D-* / WF-S-* (skip on gold). WF-S-02 lists `with-expo` |
 | `test_code.py` | CQ-G-* (`@assistant-ui/react-native`, expo, not Next) / CQ-P-* toolkit + weather |

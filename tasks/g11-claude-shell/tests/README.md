@@ -9,3 +9,5 @@
 | `lib/workspace.py` | `CHAT_USER_TEXT` / `CHAT_FOLLOW_UP` / thread prompts |
 
 Gold skips WF-*. Model selector is **not** scored (G10). Reload persistence is **not** scored (G1).
+
+**Scoring:** `AR-*` / `BR-*` weight **2**; CQ / WF weight **1**.
