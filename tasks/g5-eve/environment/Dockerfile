@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim
+FROM node:26.13.0-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
